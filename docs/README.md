@@ -28,24 +28,75 @@ Orchestrator interprets results
 "You have 1 meeting today: ET Data Science Bi-Weekly at 11:00 AM"
 ```
 
+## Prerequisites
+
+- **Python 3.11+**
+- **OpenAI API key** — for LLM code generation (gpt-5.2-codex / gpt-4o)
+- **MCP servers running** — the tools codemode calls (calendar, search, github, etc.)
+- **Node.js** (optional) — only for `pyodide-wasm` backend
+
 ## Install
 
 ```bash
-pip install python-codemode[langchain]
-```
-
-Or from source:
-
-```bash
+# 1. Clone the repo
 git clone https://github.com/rounakbende10/python-codemode.git
 cd python-codemode
+
+# 2. Create a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Install with LangChain support
 pip install -e ".[langchain]"
+
+# 4. Set your OpenAI API key
+echo "OPENAI_API_KEY=sk-your-key-here" > .env
+
+# 5. (Optional) For Pyodide WASM backend
+npm install pyodide
+
+# 6. (Optional) For running tests
+pip install -r requirements-dev.txt
+pytest
 ```
 
-For Pyodide WASM backend (optional):
+### What each dependency does
+
+| Package | Why | Installed by |
+|---|---|---|
+| `openai` | LLM code generation via Responses API | `pip install -e .` |
+| `aiohttp` | MCP SSE connections (MCPToolLoader) | `pip install -e .` |
+| `pydantic` | Schema validation | `pip install -e .` |
+| `langchain`, `langchain-openai` | LangChain agent integration | `pip install -e ".[langchain]"` |
+| `langchain-mcp-adapters` | Official LangChain MCP loader | `pip install -e ".[langchain]"` |
+| `pyodide` (npm) | Actual WASM sandbox | `npm install pyodide` |
+| `pytest`, `pytest-asyncio` | Testing | `pip install -r requirements-dev.txt` |
+
+### Start MCP servers
+
+Codemode needs MCP servers running for the tools. Example with npx:
 
 ```bash
-npm install pyodide
+# Google Calendar MCP (port 3001)
+npx -y @anthropic/google-calendar-mcp --port 3001
+
+# Serper search MCP (port 3002)
+SERPER_API_KEY=your-key npx -y @anthropic/serper-mcp --port 3002
+
+# GitHub MCP (port 3003)
+GITHUB_TOKEN=your-token npx -y @anthropic/github-mcp --port 3003
+```
+
+Adjust server commands and ports to match your MCP setup. The examples default to ports 3001/3002/3003.
+
+### Verify everything works
+
+```bash
+# Run tests (no MCP servers needed)
+pytest
+
+# Test with MCP servers running
+python3 examples/langchain_agent.py "what meetings do I have today"
 ```
 
 ## Quick Start

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "python-codemode"
 version = "0.1.0"
 description = "Python sandbox execution with LLM code generation - a Python port of Cloudflare's Codemode"
-readme = "docs/README.md"
+readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 authors = [

@@ -46,8 +46,12 @@ cd python-codemode
 python3 -m venv .venv
 source .venv/bin/activate
 
-# 3. Install with LangChain support
-pip install -e ".[langchain]"
+# 3. Install (pick one)
+pip install -e .               # core only (openai, aiohttp, pydantic)
+pip install -e ".[langchain]"  # + LangChain agent support
+pip install -e ".[docker]"     # + Docker backend
+pip install -e ".[all]"        # everything
+pip install -e ".[dev]"        # + pytest for running tests
 
 # 4. Set your OpenAI API key
 echo "OPENAI_API_KEY=sk-your-key-here" > .env
@@ -55,22 +59,20 @@ echo "OPENAI_API_KEY=sk-your-key-here" > .env
 # 5. (Optional) For Pyodide WASM backend
 npm install pyodide
 
-# 6. (Optional) For running tests
-pip install -r requirements-dev.txt
-pytest
+# 6. Verify
+pytest                         # 204 tests
 ```
 
-### What each dependency does
+### What gets installed
 
-| Package | Why | Installed by |
-|---|---|---|
-| `openai` | LLM code generation via Responses API | `pip install -e .` |
-| `aiohttp` | MCP SSE connections (MCPToolLoader) | `pip install -e .` |
-| `pydantic` | Schema validation | `pip install -e .` |
-| `langchain`, `langchain-openai` | LangChain agent integration | `pip install -e ".[langchain]"` |
-| `langchain-mcp-adapters` | Official LangChain MCP loader | `pip install -e ".[langchain]"` |
-| `pyodide` (npm) | Actual WASM sandbox | `npm install pyodide` |
-| `pytest`, `pytest-asyncio` | Testing | `pip install -r requirements-dev.txt` |
+| Command | Packages |
+|---|---|
+| `pip install -e .` | `openai`, `aiohttp`, `pydantic` |
+| `pip install -e ".[langchain]"` | + `langchain`, `langchain-openai`, `langchain-mcp-adapters` |
+| `pip install -e ".[docker]"` | + `docker` |
+| `pip install -e ".[all]"` | all of the above |
+| `pip install -e ".[dev]"` | + `pytest`, `pytest-asyncio`, `pytest-cov` |
+| `npm install pyodide` | Pyodide WASM runtime (for `pyodide-wasm` backend) |
 
 ### Start MCP servers
 

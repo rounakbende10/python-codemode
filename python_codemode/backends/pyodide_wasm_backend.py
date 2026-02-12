@@ -155,13 +155,18 @@ class PyodideWasmBackend(SandboxBackend):
             await process.stdin.drain()
 
             # ---- 4. Tool-call proxy loop ---------------------------------
+            # Collect concurrent tool_call messages and execute them
+            # in parallel using asyncio.gather, so asyncio.gather()
+            # inside the generated code actually runs tools concurrently.
             remaining = timeout - (time.monotonic() - start)
+            pending_calls: list[dict] = []
+
             while remaining > 0:
+                # Read next line (or batch — short timeout for batching)
                 line = await asyncio.wait_for(
                     process.stdout.readline(), timeout=remaining
                 )
                 if not line:
-                    # stdout closed -- process exited
                     break
 
                 msg = _parse_json_line(line)
@@ -175,19 +180,67 @@ class PyodideWasmBackend(SandboxBackend):
 
                 msg_type = msg.get("type")
 
-                # -- tool_call: proxy to real tool -------------------------
                 if msg_type == "tool_call":
-                    tool_result = await self._handle_tool_call(
-                        msg, tools, tool_calls, timeout=remaining
-                    )
+                    pending_calls.append(msg)
 
-                    # Send the result back to the runner
-                    response = json.dumps(tool_result, default=str) + "\n"
-                    process.stdin.write(response.encode())
-                    await process.stdin.drain()
+                    # Check if more tool_calls are immediately available
+                    # (asyncio.gather fires multiple calls at once)
+                    while True:
+                        try:
+                            next_line = await asyncio.wait_for(
+                                process.stdout.readline(), timeout=0.05
+                            )
+                            if not next_line:
+                                break
+                            next_msg = _parse_json_line(next_line)
+                            if next_msg and next_msg.get("type") == "tool_call":
+                                pending_calls.append(next_msg)
+                            elif next_msg and next_msg.get("type") == "result":
+                                # Edge case: result came before we processed calls
+                                pending_calls.clear()
+                                msg = next_msg
+                                msg_type = "result"
+                                break
+                            else:
+                                break
+                        except asyncio.TimeoutError:
+                            break  # No more pending calls in the buffer
+
+                    if msg_type == "result":
+                        pass  # Fall through to result handler below
+                    elif pending_calls:
+                        # Execute all pending tool calls in parallel
+                        if len(pending_calls) > 1:
+                            logger.info(
+                                "PYODIDE WASM | %d concurrent tool calls → parallel execution",
+                                len(pending_calls),
+                            )
+
+                        async def _exec_one(call_msg):
+                            return await self._handle_tool_call(
+                                call_msg, tools, tool_calls, timeout=remaining
+                            )
+
+                        results = await asyncio.gather(
+                            *[_exec_one(c) for c in pending_calls],
+                            return_exceptions=True,
+                        )
+
+                        # Send all results back
+                        for r in results:
+                            if isinstance(r, Exception):
+                                r = {"type": "tool_result", "id": 0,
+                                     "result": {"error": str(r)}}
+                            response = json.dumps(r, default=str) + "\n"
+                            process.stdin.write(response.encode())
+                        await process.stdin.drain()
+                        pending_calls.clear()
+
+                        remaining = timeout - (time.monotonic() - start)
+                        continue
 
                 # -- result: final output from Pyodide ---------------------
-                elif msg_type == "result":
+                if msg_type == "result":
                     duration = time.monotonic() - start
                     success = msg.get("success", False)
 

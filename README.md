@@ -409,6 +409,98 @@ cm = codemode(
 | MCP responses | Raw content blocks (`JSON.parse(content[0].text)`) | Pre-parsed dicts (MCPToolLoader) |
 | Integrations | Vercel AI SDK | LangChain, OpenAI, Vercel |
 
+## How the Backends Work
+
+### Restricted exec (`backend="pyodide"`)
+
+Same Python process, isolated namespace. Fast, no dependencies.
+
+```
+Python Process
+│
+├── CodeMode.run()
+│     │
+│     ▼
+│   exec(code, namespace)          ← runs in same process
+│     │
+│     │  namespace = {
+│     │    tools: {name: fn},      ← direct function references
+│     │    asyncio, datetime, ...  ← pre-loaded modules
+│     │    __builtins__: {         ← restricted (no open, eval, __import__)
+│     │      print, len, range, str, int, dict, list, ...
+│     │    }
+│     │  }
+│     │
+│     │  tools['get-current-time']()
+│     │         │
+│     │         ▼
+│     │  proxy.call() ──→ MCP server ──→ result
+│     │         │
+│     │         ▼  (direct return, same memory)
+│     │  result = {"currentTime": "..."}
+│     │
+│     ▼
+│   return main()  ──→  output dict
+│
+│  Security: AST blocks os/subprocess/sys imports
+│  Speed: ~0.001ms overhead per tool call
+│  Isolation: software-level (same process memory)
+```
+
+### Pyodide WASM (`backend="pyodide-wasm"`)
+
+Separate Node.js process, Python runs inside WebAssembly. True memory isolation.
+
+```
+Python Process                          Node.js Process
+│                                       │
+├── CodeMode.run()                      │
+│     │                                 │
+│     ├── spawn ──────────────────────→ │ pyodide_runner.js
+│     │                                 │   │
+│     │                                 │   ├── loadPyodide()
+│     │                                 │   │   └── WASM boots (0.7s)
+│     │  ←── {"type": "ready"} ────────│   │       └── CPython in WASM
+│     │                                 │   │
+│     ├── {"type": "execute",     ────→│   ├── exec(code) inside WASM
+│     │    "code": "async def..."}      │   │
+│     │                                 │   │  tools['get-current-time']()
+│     │                                 │   │     │
+│     │                                 │   │     ▼ Python(WASM) → JS bridge
+│     │  ←── {"type": "tool_call", ────│   │     write to stdout
+│     │       "name": "get-time"}       │   │
+│     │     │                           │   │  (waiting for result...)
+│     │     ▼                           │   │
+│     │  proxy.call() → MCP → result    │   │
+│     │     │                           │   │
+│     ├── {"type": "tool_result", ────→│   │     ▼ JS → Python(WASM)
+│     │    "result": {...}}             │   │     resolve promise
+│     │                                 │   │
+│     │                                 │   │  result = {"currentTime": "..."}
+│     │                                 │   │
+│     │  ←── {"type": "result",  ──────│   ├── return main() output
+│     │       "output": {...}}          │   │
+│     │                                 │   └── exit
+│     ▼
+│   return output dict
+│
+│  Security: WASM memory boundary (can't escape)
+│  Speed: ~0.7s boot + ~5ms per tool call (JSON bridge)
+│  Isolation: hardware-level (separate memory space)
+```
+
+### Key difference
+
+```
+Restricted exec:     tools['name']()  →  fn()           →  result
+                     (same memory, instant)
+
+Pyodide WASM:        tools['name']()  →  JS bridge      →  stdout JSON
+                     →  Python host   →  fn()            →  stdin JSON
+                     →  JS bridge     →  result
+                     (6 hops, ~5ms overhead per call)
+```
+
 ## License
 
 MIT

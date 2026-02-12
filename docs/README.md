@@ -1,227 +1,360 @@
 # python-codemode
 
-A Python port of [Cloudflare's Codemode](https://github.com/cloudflare/codemode) -- wrap your tools, let LLMs generate Python code, and execute it safely in a sandbox.
+A Python port of [Cloudflare's Codemode](https://blog.cloudflare.com/code-mode/) — wraps your tools, lets LLMs generate Python code, and executes it safely in a sandbox.
 
-## Architecture
+Instead of calling tools one at a time, the LLM writes code that calls multiple tools, chains results, runs parallel operations, and processes data — all in a single execution.
+
+## How It Works
 
 ```
-+-------------------+       +------------------+       +------------------+
-|                   |       |                  |       |                  |
-|   User / LLM      +------>   CodeMode API    +------>   Code Generator |
-|   (task string)   |       |   (codemode.py)  |       |   (generator.py)|
-|                   |       |                  |       |                  |
-+-------------------+       +--------+---------+       +------------------+
-                                     |
-                                     v
-                            +--------+---------+
-                            |                  |
-                            |   Tool Proxy     |
-                            |   (proxy.py)     |
-                            |                  |
-                            +--------+---------+
-                                     |
-                    +----------------+----------------+
-                    |                |                 |
-           +--------+------+ +------+-------+ +------+-------+
-           |               | |              | |              |
-           | Pyodide       | | Docker       | | nsjail       |
-           | Backend       | | Backend      | | Backend      |
-           | (restricted   | | (container)  | | (Linux jail) |
-           |  exec)        | |              | |              |
-           +---------------+ +--------------+ +--------------+
+User: "what meetings do I have today"
+  │
+  ▼
+Orchestrator LLM (gpt-5-mini)
+  │ decides to call codemode
+  ▼
+CodeMode
+  ├── gpt-5.2-codex generates Python code
+  ├── Code runs in sandbox (restricted exec or Pyodide WASM)
+  ├── tools['get-current-time']()  ──→  MCP Server (Calendar)
+  ├── tools['list-calendars']()    ──→  MCP Server (Calendar)
+  ├── tools['list-events'](...)    ──→  MCP Server (Calendar)
+  └── Returns structured results
+  │
+  ▼
+Orchestrator interprets results
+  │
+  ▼
+"You have 1 meeting today: ET Data Science Bi-Weekly at 11:00 AM"
 ```
 
-### Components
-
-| Module | Description |
-|--------|-------------|
-| `src/codemode.py` | Main public API -- `codemode()` factory and `CodeMode` class |
-| `src/generator.py` | LLM-based code generation with validation and fallback |
-| `src/proxy.py` | Routes sandbox tool calls to real tool implementations |
-| `src/schema.py` | Converts Python callables to JSON Schema for LLM prompts |
-| `src/metrics.py` | Tracks execution counts, durations, retries, and token usage |
-| `src/backends/base.py` | Abstract `SandboxBackend` base class and `ExecutionResult` |
-| `src/backends/pyodide_backend.py` | Default backend using restricted `exec()` with AST validation |
-| `src/main.py` | CLI entry point with argparse |
-
-## Installation
+## Install
 
 ```bash
-# From source
-pip install -e .
+pip install python-codemode[langchain]
+```
 
-# With optional dependencies
-pip install -e ".[openai]"     # OpenAI code generation
-pip install -e ".[docker]"     # Docker sandbox backend
-pip install -e ".[all]"        # Everything
+Or from source:
+
+```bash
+git clone https://github.com/rounakbende10/python-codemode.git
+cd python-codemode
+pip install -e ".[langchain]"
+```
+
+For Pyodide WASM backend (optional):
+
+```bash
+npm install pyodide
 ```
 
 ## Quick Start
 
-### Python API
+### Direct usage
 
 ```python
-import asyncio
-from src import codemode
+from python_codemode import codemode
 
-# Define your tools
-async def search_web(query: str) -> list:
-    return [{"title": "Result", "url": "https://example.com"}]
+async def search(query: str) -> list:
+    return [{"title": f"Result for {query}"}]
 
-async def create_event(title: str, date: str) -> dict:
-    return {"id": "evt_1", "title": title, "date": date}
+cm = codemode(tools={"search": search}, backend="pyodide")
 
-# Create a CodeMode instance
-cm = codemode(
-    tools={
-        "search_web": search_web,
-        "create_event": create_event,
-    },
-    backend="pyodide",       # sandbox backend
-    model="gpt-4o-mini",     # LLM for code generation
-    max_retries=3,           # retry on failure
-    timeout=30,              # execution timeout (seconds)
-)
+# LLM generates code from natural language
+result = await cm.run("search for python tutorials")
 
-# Run a task
-result = asyncio.run(cm.run("Search for Python conferences and create calendar events"))
-print(result)
-# {
-#   "success": True,
-#   "output": {...},
-#   "duration": 1.23,
-#   "backend": "pyodide",
-#   "tool_calls": [...]
-# }
-```
-
-### Execute Pre-written Code
-
-```python
-result = asyncio.run(cm.run_code("""
+# Or run pre-written code (no LLM needed)
+result = await cm.run_code("""
 async def main():
-    results = await tools['search_web']('Python tutorials')
+    results = await tools['search']('python tutorials')
     return {'results': results}
-"""))
+""")
 ```
 
-### CLI
-
-```bash
-# Run a task with default settings
-python -m src "Search for Python tutorials"
-
-# Use a specific backend with verbose output
-python -m src "Create a GitHub issue" --backend pyodide --verbose
-
-# Compare backends
-python -m src "Search the web" --compare
-
-# Set timeout and retries
-python -m src "Complex task" --timeout 60 --max-retries 5
-```
-
-## Sandbox Security
-
-The Pyodide backend enforces safety by:
-
-1. **AST-level import checking** -- blocks `os`, `subprocess`, `sys`, `shutil`, `socket`, `signal`, `ctypes`, and `importlib`
-2. **Restricted builtins** -- only safe builtins are exposed (`print`, `len`, `range`, math operations, etc.)
-3. **Timeout enforcement** -- configurable execution timeout via `asyncio.wait_for`
-4. **Tool isolation** -- tools are accessed only through the proxy, which logs every call
-
-### Forbidden Modules
-
-The following modules are blocked from import in sandboxed code:
-
-- `os` - filesystem and process access
-- `subprocess` - shell command execution
-- `sys` - interpreter internals
-- `shutil` - file operations
-- `socket` - network access
-- `signal` - process signals
-- `ctypes` - C library access
-- `importlib` - dynamic imports
-
-## Code Generation
-
-The generator creates sandbox-safe Python code from natural language. It:
-
-1. Formats tool schemas into a prompt
-2. Calls the configured LLM (defaults to `gpt-4o-mini`)
-3. Extracts code from the response (handles markdown fences)
-4. Validates the code via AST analysis
-5. Falls back to template-based generation if the LLM is unavailable
-
-### Validation Rules
-
-- Code must contain an `async def main()` entry point
-- No forbidden module imports
-- Must be valid Python syntax
-
-## Metrics
-
-Access execution metrics through the `CodeMode.metrics` property:
+### With MCP servers
 
 ```python
-cm = codemode(tools={...})
-await cm.run("some task")
+from python_codemode import codemode
+from python_codemode.mcp_adapter import MCPToolLoader
 
-# Get summary
-print(cm.metrics.summary())
-# {
-#   "total_executions": 1,
-#   "successful_executions": 1,
-#   "total_tool_calls": 2,
-#   "total_tokens": 0,
-#   "retries": 0,
-#   "avg_execution_time": 0.045,
-# }
+async with MCPToolLoader() as loader:
+    loader.add_sse_server("calendar", "http://localhost:3001/sse")
+    loader.add_sse_server("serper",   "http://localhost:3002/sse")
+    loader.add_sse_server("github",   "http://localhost:3003/sse")
 
-# Pretty table
-print(cm.metrics.format_table())
+    tools = await loader.load_tools()  # 40 tools discovered
+
+    cm = codemode(tools=tools, backend="pyodide")
+    result = await cm.run("what meetings do I have today")
+```
+
+### LangChain agent
+
+```python
+from python_codemode import codemode
+from python_codemode.mcp_adapter import MCPToolLoader
+from langchain_openai import ChatOpenAI
+from langchain.agents import create_agent
+
+async with MCPToolLoader() as loader:
+    loader.add_sse_server("calendar", "http://localhost:3001/sse")
+    tools = await loader.load_tools()
+
+    cm = codemode(tools=tools, backend="pyodide-wasm")
+    codemode_tool = cm.as_langchain_tool()
+
+    llm = ChatOpenAI(model="gpt-5-mini")
+    agent = create_agent(llm, tools=[codemode_tool], system_prompt="...")
+    result = await agent.ainvoke({"messages": [("user", "what meetings today")]})
+```
+
+### With LangChain @tool
+
+```python
+from langchain_core.tools import tool
+from python_codemode import codemode
+
+@tool
+async def search(query: str) -> list:
+    """Search the web."""
+    return [{"title": "Result"}]
+
+@tool
+async def notify(message: str) -> dict:
+    """Send a notification."""
+    return {"sent": True}
+
+cm = codemode(tools=[search, notify])
+result = await cm.run("search for AI news and notify me")
+```
+
+### OpenAI Responses API
+
+```python
+from python_codemode import codemode
+from openai import OpenAI
+
+cm = codemode(tools=mcp_tools)
+openai_tool = cm.as_openai_tool()
+
+client = OpenAI()
+response = client.responses.create(
+    model="gpt-5-mini",
+    input="what meetings do I have today",
+    tools=[openai_tool],
+)
+```
+
+### Vercel AI SDK
+
+```python
+cm = codemode(tools=mcp_tools)
+vercel_tool = cm.as_vercel_tool()
+
+# vercel_tool has: description, parameters, execute
+result = await vercel_tool["execute"]({"task": "list my events"})
+```
+
+### Batch execution (parallel)
+
+```python
+result = await cm.batch_run([
+    "search for AI conferences",
+    "list my calendar events",
+    "check open github issues",
+])
+# 3 tasks run in parallel, each with own code generation
+```
+
+## Architecture
+
+```
+python-codemode/
+├── python_codemode/
+│   ├── __init__.py              # codemode(), create_agent(), create_codemode_tool()
+│   ├── codemode.py              # CodeMode class — self-healing retry loop
+│   ├── agent.py                 # LangChain/LangGraph integration
+│   ├── generator.py             # LLM code generation (OpenAI Responses API)
+│   ├── proxy.py                 # Tool call routing + logging + None stripping
+│   ├── schema.py                # JSON Schema ↔ Python type conversion
+│   ├── metrics.py               # Per-call token tracking + execution metrics
+│   ├── mcp_adapter.py           # MCP SSE/stdio client with auto-reconnect
+│   ├── backends/
+│   │   ├── base.py              # SandboxBackend abstract class
+│   │   ├── pyodide_backend.py   # Restricted exec() sandbox (default)
+│   │   ├── pyodide_wasm_backend.py  # Actual Pyodide WASM via Node.js
+│   │   ├── pyodide_runner.js    # Node.js script for WASM execution
+│   │   ├── docker_backend.py    # Docker container sandbox
+│   │   └── nsjail_backend.py    # nsjail/gVisor sandbox (Linux)
+│   └── integrations/
+│       ├── langchain.py         # cm.as_langchain_tool()
+│       ├── openai.py            # cm.as_openai_tool() / cm.as_openai_function()
+│       └── vercel.py            # cm.as_vercel_tool()
+├── examples/                    # Working examples for every integration
+├── tests/                       # 204 tests
+└── docs/
 ```
 
 ## Backends
 
-| Backend | Platform | Isolation Level | Description |
-|---------|----------|----------------|-------------|
-| `pyodide` | Any | Medium | Restricted `exec()` with AST checks (default) |
-| `docker` | Any with Docker | High | Full container isolation |
-| `nsjail` | Linux only | Very High | Linux namespace jail |
-
-Backends are selected at construction time and fall back to `pyodide` if unavailable.
-
-## Framework Integrations
-
-The `CodeMode` instance can be exported for use with popular frameworks:
+| Backend | `backend=` | Isolation | Speed | Requirements |
+|---|---|---|---|---|
+| Restricted exec | `"pyodide"` | AST-checked imports + restricted builtins | Fast (sub-ms) | None |
+| Pyodide WASM | `"pyodide-wasm"` | True WASM memory isolation | ~0.7s boot | Node.js + `npm install pyodide` |
+| Docker | `"docker"` | Container isolation | ~2s boot | Docker running |
+| nsjail | `"nsjail"` | Syscall-level (Google-grade) | Fast | Linux + nsjail binary |
 
 ```python
-cm = codemode(tools={...})
-
-# LangChain
-tool = cm.as_langchain_tool()
-
-# OpenAI function calling
-fn_def = cm.as_openai_function()
-tool_def = cm.as_openai_tool()
-
-# Vercel AI SDK
-vercel_tool = cm.as_vercel_tool()
+cm = codemode(tools=tools, backend="pyodide")       # default — fast
+cm = codemode(tools=tools, backend="pyodide-wasm")   # true isolation
+cm = codemode(tools=tools, backend="docker")          # container
+cm = codemode(tools=tools, backend="nsjail")          # syscall sandbox
 ```
 
-## Development
+Falls back to restricted exec if the requested backend isn't available.
+
+## MCP Tool Loaders
+
+Works with any MCP client library:
+
+```python
+# Built-in MCPToolLoader (recommended — returns clean dicts)
+from python_codemode.mcp_adapter import MCPToolLoader
+async with MCPToolLoader() as loader:
+    loader.add_sse_server("calendar", "http://localhost:3001/sse")
+    tools = await loader.load_tools()
+
+# langchain-mcp-adapters (official LangChain)
+from langchain_mcp_adapters.client import MultiServerMCPClient
+client = MultiServerMCPClient({"cal": {"transport": "sse", "url": "..."}})
+tools = await client.get_tools()
+
+# langchain-mcp-tools (community)
+from langchain_mcp_tools import convert_mcp_to_langchain_tools
+tools, cleanup = await convert_mcp_to_langchain_tools(config)
+
+# mcp-use
+from mcp_use import MCPClient
+from mcp_use.adapters.langchain_adapter import LangChainAdapter
+tools = await LangChainAdapter().create_tools(MCPClient(config))
+
+# All work with codemode:
+cm = codemode(tools=tools)
+```
+
+## Self-Healing Retry Loop
+
+When generated code fails, codemode feeds the error + actual tool responses back to the LLM:
+
+```
+Attempt 1: LLM guesses response format → KeyError: 'items'
+           Tool responses captured by proxy
+
+Attempt 2: LLM sees actual data:
+           "tools['list-events']() returned dict with keys: ['events', 'totalCount']"
+           → fixes code → succeeds
+```
+
+Empty output detection: if code "succeeds" but returns `{}` while tools were called, triggers a retry with tool response data.
+
+Previous code is included in retry prompt (like Cloudflare) so the LLM sees what already ran and writes idempotent code.
+
+## Metrics & Logging
+
+```python
+import logging
+logging.getLogger("codemode").setLevel(logging.INFO)
+
+result = await cm.run("task", verbose=True)
+
+# Per-call token usage
+result["metrics"]["llm_calls"]
+# [{"attempt": 1, "model": "gpt-5.2-codex", "input_tokens": 7895, "output_tokens": 952, ...}]
+
+# Cumulative
+result["metrics"]["total_tokens"]       # 8847
+result["metrics"]["total_input_tokens"] # 7895
+
+# Tool breakdown
+result["metrics"]["tool_breakdown"]
+# {"get-current-time": {"calls": 1, "successes": 1, "total_time": 0.51}, ...}
+```
+
+Verbose output:
+
+```
+╔══════════════════════════════════════════════════════════╗
+║               CODEMODE METRICS                         ║
+╠══════════════════════════════════════════════════════════╣
+║ LLM Calls
+║   Attempt 1 | gpt-5.2-codex | in=7895 out=952 total=8847 | 17.56s
+║   Cumulative: in=7895 out=952 total=8847 | 17.56s
+╠──────────────────────────────────────────────────────────
+║ Sandbox Executions
+║   Total: 1 | OK: 1 | Failed: 0 | Retries: 0
+╠──────────────────────────────────────────────────────────
+║ Tool Calls
+║   Total: 5 | OK: 5 | Failed: 0
+║
+║   Name                      Calls   OK Fail     Time
+║   ────────────────────────────────────────────────
+║   get-current-time              1    1    0   0.513s
+║   list-calendars                1    1    0   0.543s
+║   list-events                   3    3    0   2.605s
+╚══════════════════════════════════════════════════════════╝
+```
+
+## Examples
 
 ```bash
-# Install dev dependencies
-pip install -e ".[dev]"
+# Agent examples
+python3 examples/langchain_agent.py "what meetings do I have today"
+python3 examples/openai_agent.py "search for AI conferences"
+python3 examples/vercel_agent.py "list my github repos"
 
-# Run tests
-pytest tests/ -v
+# Direct codemode
+python3 examples/direct_codemode.py "what meetings today"
+python3 examples/direct_codemode.py --code    # pre-written code
+python3 examples/direct_codemode.py --batch   # parallel tasks
 
-# Run with coverage
-pytest tests/ --cov=src --cov-report=term-missing
+# MCP loader examples
+python3 examples/with_mcp_toolloader.py "query"
+python3 examples/with_langchain_mcp_adapters.py "query"
+python3 examples/with_langchain_mcp_tools.py "query"
+python3 examples/with_mcp_use.py "query"
+python3 examples/with_mcp_sdk.py "query"
+
+# Pyodide WASM backend
+python3 examples/with_pyodide_wasm.py "query"
+python3 examples/with_pyodide_wasm.py --compare "query"  # compare backends
 ```
+
+## Configuration
+
+```python
+cm = codemode(
+    tools=tools,                    # dict or list of tools
+    backend="pyodide",              # sandbox backend
+    code_model="gpt-5.2-codex",     # code generation model
+    model="gpt-5-mini",             # orchestrator model
+    api_key="sk-...",               # OpenAI API key
+    max_retries=3,                  # max code generation retries
+    timeout=60,                     # sandbox execution timeout (seconds)
+)
+```
+
+## Comparison with Cloudflare's Codemode
+
+| | Cloudflare | python-codemode |
+|---|---|---|
+| Language | TypeScript / JavaScript | Python |
+| Sandbox | V8 isolates (WASM) | Restricted exec, Pyodide WASM, Docker, nsjail |
+| Tool schemas | TypeScript interfaces from `inputSchema` + `outputSchema` | Python type stubs from `inputSchema` |
+| Structured output | `generateObject({ schema })` | `responses.create(text={format: json_schema})` |
+| Parallel calls | `Promise.all()` | `asyncio.gather()` |
+| Retry | Previous code + error | Previous code + error + tool responses + key listing |
+| MCP responses | Raw content blocks (`JSON.parse(content[0].text)`) | Pre-parsed dicts (MCPToolLoader) |
+| Integrations | Vercel AI SDK | LangChain, OpenAI, Vercel |
 
 ## License
 

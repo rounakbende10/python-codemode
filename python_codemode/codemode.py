@@ -24,7 +24,7 @@ class CodeMode:
     def __init__(
         self,
         tools: dict[str, Callable],
-        backend: str = "pyodide",
+        backend: str = "pyodide-wasm",
         model: str = "gpt-5-mini",
         code_model: str = "gpt-5.2-codex",
         api_key: str = None,
@@ -294,7 +294,7 @@ class CodeMode:
             if not output:
                 return True
             return all(
-                v is None or v == [] or v == {} or v == "" or v == 0
+                v is None or v == [] or v == {} or v == ""
                 for v in output.values()
             )
         if isinstance(output, (list, str)) and len(output) == 0:
@@ -465,7 +465,7 @@ def _normalize_tool_list(tools_list: list) -> dict[str, callable]:
 
 def codemode(
     tools,
-    backend: str = "pyodide",
+    backend: str = "pyodide-wasm",
     **kwargs,
 ) -> CodeMode:
     """Create a CodeMode instance.

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import time
 from typing import Any, Callable
@@ -79,15 +78,38 @@ class ToolProxy:
             args = ()
 
         try:
-            if asyncio.iscoroutinefunction(fn):
-                result = await fn(*args, **kwargs)
-            else:
-                result = fn(*args, **kwargs)
+            try:
+                if asyncio.iscoroutinefunction(fn):
+                    result = await fn(*args, **kwargs)
+                else:
+                    result = fn(*args, **kwargs)
+            except Exception as call_exc:
+                # Retry once on SSE/transport connection errors
+                exc_str = str(call_exc)
+                if "TaskGroup" in exc_str or "BrokenResource" in exc_str:
+                    await asyncio.sleep(0.1)
+                    if asyncio.iscoroutinefunction(fn):
+                        result = await fn(*args, **kwargs)
+                    else:
+                        result = fn(*args, **kwargs)
+                else:
+                    raise
 
             # Unwrap tuple responses — some LangChain tools return
             # (content, artifact) tuples. Extract the content part.
             if isinstance(result, tuple) and len(result) >= 1:
                 result = result[0]
+            # Unwrap MCP content blocks — langchain-mcp-adapters and
+            # other clients return [{type:"text", text:"..."}] lists.
+            if isinstance(result, list) and result:
+                item = result[0]
+                text = (item.get("text") if isinstance(item, dict)
+                        else getattr(item, "text", None))
+                if text and isinstance(text, str):
+                    try:
+                        result = json.loads(text)
+                    except (ValueError, TypeError):
+                        result = text
             # Parse JSON string responses into dicts
             if isinstance(result, str):
                 try:
@@ -95,6 +117,12 @@ class ToolProxy:
                     result = _json.loads(result)
                 except (ValueError, TypeError):
                     pass
+            # Detect MCP validation errors returned as plain strings
+            if isinstance(result, str) and any(kw in result.lower() for kw in (
+                "validation error", "required property", "missing required",
+                "invalid argument", "is not valid",
+            )):
+                raise ToolExecutionError(f"Tool '{name}' validation error: {result}")
         except Exception as exc:
             success = False
             error_msg = str(exc)

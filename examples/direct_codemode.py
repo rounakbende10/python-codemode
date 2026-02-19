@@ -111,7 +111,7 @@ async def main():
 
         cm = codemode(
             tools=mcp_tools,
-            backend="pyodide",
+            backend="pyodide-wasm",
             code_model="gpt-5.2-codex",
             api_key=api_key,
             max_retries=3,

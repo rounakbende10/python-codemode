@@ -19,7 +19,7 @@ class TestCodemodeFactory:
 
     def test_codemode_default_backend(self, mock_tools):
         cm = codemode(tools=mock_tools)
-        assert cm.backend_name == "pyodide"
+        assert cm.backend_name == "pyodide-wasm"
 
     def test_codemode_custom_backend(self, mock_tools):
         cm = codemode(tools=mock_tools, backend="docker")
@@ -56,7 +56,7 @@ class TestCodemodeFactory:
 class TestCodeModeRun:
     async def test_run_with_simple_code(self, mock_tools):
         """Test run_code with a simple code string that uses tools."""
-        cm = codemode(tools=mock_tools)
+        cm = codemode(tools=mock_tools, backend="pyodide")
         code = """
 async def main():
     results = await tools['search_web']('python')
@@ -69,7 +69,7 @@ async def main():
 
     async def test_run_code_with_multiple_tools(self, mock_tools):
         """Test code that calls multiple tools."""
-        cm = codemode(tools=mock_tools)
+        cm = codemode(tools=mock_tools, backend="pyodide")
         code = """
 async def main():
     search = await tools['search_web']('test')
@@ -83,7 +83,7 @@ async def main():
 
     async def test_run_code_returns_tool_calls(self, mock_tools):
         """Test that tool call log is included in the result."""
-        cm = codemode(tools=mock_tools)
+        cm = codemode(tools=mock_tools, backend="pyodide")
         code = """
 async def main():
     await tools['search_web']('test')

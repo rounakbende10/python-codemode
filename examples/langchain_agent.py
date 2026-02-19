@@ -85,11 +85,11 @@ async def main():
 
         # 3. Standard LangChain agent setup
         from langchain_openai import ChatOpenAI
-        from langchain.agents import create_agent as lc_create_agent
+        from langchain.agents import create_agent
 
         llm = ChatOpenAI(model="gpt-5-mini", api_key=api_key)
 
-        agent = lc_create_agent(
+        agent = create_agent(
             llm,
             tools=[codemode_tool],
             system_prompt=(

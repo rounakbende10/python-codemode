@@ -106,7 +106,7 @@ class MCPConnection:
         sse_url = self.config.url
 
         # Open the SSE stream and wait for the endpoint event
-        endpoint_future = asyncio.get_event_loop().create_future()
+        endpoint_future = asyncio.get_running_loop().create_future()
 
         async def sse_listener():
             try:
@@ -253,7 +253,7 @@ class MCPConnection:
             "params": params,
         }
 
-        future = asyncio.get_event_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
 
         if self.config.transport == "stdio":

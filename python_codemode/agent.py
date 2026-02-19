@@ -38,7 +38,7 @@ def create_agent(
     codemode: bool = True,
     code_model: str = "gpt-5.2-codex",
     api_key: str = None,
-    backend: str = "pyodide",
+    backend: str = "pyodide-wasm",
     verbose: bool = False,
     system_prompt: str = None,
     max_retries: int = 5,
@@ -134,9 +134,6 @@ def create_agent(
 
     agent = create_react_agent(llm, lc_tools, system_prompt=system_prompt)
 
-    # Set recursion limit to prevent infinite loops
-    agent.config = {"recursion_limit": 10}
-
     return agent
 
 
@@ -144,7 +141,7 @@ def create_codemode_tool(
     tools,
     code_model: str = "gpt-5.2-codex",
     api_key: str = None,
-    backend: str = "pyodide",
+    backend: str = "pyodide-wasm",
     max_retries: int = 5,
     timeout: int = 60,
     verbose: bool = False,
@@ -246,11 +243,15 @@ def _wrap_callable(name: str, fn: Callable):
         input: str = Field(description=f"JSON arguments for {name}")
 
     async def _run(input: str) -> str:
+        import asyncio as _asyncio
         try:
             arg = json.loads(input)
         except json.JSONDecodeError:
             arg = {"query": input}
-        result = await fn(arg)
+        if _asyncio.iscoroutinefunction(fn):
+            result = await fn(arg)
+        else:
+            result = fn(arg)
         return json.dumps(result, default=str) if not isinstance(result, str) else result
 
     return StructuredTool(

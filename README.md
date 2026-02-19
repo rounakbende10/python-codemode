@@ -396,6 +396,26 @@ cm = codemode(
 )
 ```
 
+## Benchmarking
+
+See [BENCHMARKING.md](BENCHMARKING.md) for the full guide — setup, how scoring works, results vs traditional tool calling, and how to add tasks/servers/agents.
+
+Quick start:
+```bash
+cd ../mcp-bench
+set -a && source .env && set +a
+python3 run_benchmark.py --models gpt-5-mini --tasks-file tasks/test_2tasks.json --agent codemode --distraction-count 0
+```
+
+Key result (same 3 tasks, 0 distractions):
+
+| | Default (gpt-5) | Codemode (gpt-5.2-codex) |
+|---|---|---|
+| Tokens/task | 498K avg (58K–1.4M) | 16K avg |
+| Cost/task | $0.91 | $0.12 |
+| Time/task | 1,652s | 91s |
+| Quality (Task/Tool/Plan) | 7.8 / 7.9 / 7.3 | 5.3 / 5.9 / 4.6 |
+
 ## Comparison with Cloudflare's Codemode
 
 | | Cloudflare | python-codemode |

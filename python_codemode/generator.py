@@ -8,7 +8,7 @@ import sys
 import textwrap
 from typing import Any, Optional
 
-from .schema import format_tools_for_prompt
+from .schema import format_tools_for_prompt, schema_to_python_type
 
 
 # Imports that must never appear in generated code
@@ -18,7 +18,11 @@ FORBIDDEN_MODULES = frozenset({
 })
 
 SYSTEM_PROMPT = textwrap.dedent("""\
-    You are a code generating machine. Output ONLY Python code, nothing else.
+    You are a code generating machine.
+
+    FIRST think step-by-step in the "thoughts" field: which tools to call,
+    in what order, what depends on what, and how to minimize total calls.
+    THEN write the code in the "code" field.
 
     You are running in a SANDBOXED environment. You have NO access to:
     - Filesystem (no pathlib, no open, no glob)
@@ -71,10 +75,7 @@ def _generate_tool_stubs(tool_schemas: dict) -> str:
         # Build parameter signature
         param_parts = []
         for pname, pschema in props.items():
-            ptype = pschema.get("type", "str")
-            type_map = {"string": "str", "integer": "int", "number": "float",
-                        "boolean": "bool", "array": "list", "object": "dict"}
-            py_type = type_map.get(ptype, "Any")
+            py_type = schema_to_python_type(pschema) if isinstance(pschema, dict) else "Any"
             if pname in required:
                 param_parts.append(f"{pname}: {py_type}")
             else:
@@ -150,6 +151,10 @@ class CodeGenerator:
         user_prompt = _build_user_prompt(task, tool_schemas)
         full_prompt = SYSTEM_PROMPT + "\n\n" + user_prompt
 
+        import logging
+        logger = logging.getLogger("codemode")
+        logger.debug("PROMPT (%d chars):\n%s", len(full_prompt), full_prompt)
+
         self.last_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
         # --- Try primary model (structured output → clean code) ---
@@ -191,6 +196,8 @@ class CodeGenerator:
         return self._generate_fallback(task, tool_schemas)
 
     # JSON schema for structured code output (like Cloudflare's generateObject)
+    # Includes a "thoughts" field for planning before code generation,
+    # inspired by CodeAct (ICML 2024) and HuggingFace's structured CodeAgent.
     _CODE_SCHEMA = {
         "type": "json_schema",
         "name": "generated_code",
@@ -198,12 +205,16 @@ class CodeGenerator:
         "schema": {
             "type": "object",
             "properties": {
+                "thoughts": {
+                    "type": "string",
+                    "description": "Brief plan: which tools to call, in what order, what depends on what, and how to batch/parallelize",
+                },
                 "code": {
                     "type": "string",
                     "description": "Python code with async def main() that calls tools and returns a dict",
-                }
+                },
             },
-            "required": ["code"],
+            "required": ["thoughts", "code"],
             "additionalProperties": False,
         },
     }

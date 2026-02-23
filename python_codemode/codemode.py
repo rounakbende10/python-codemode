@@ -240,6 +240,23 @@ class CodeMode:
                     self._metrics.record_retry()
                     continue
 
+                # Check for tool failures hidden inside a "successful" execution
+                failed_tools = [e for e in call_log if not e.get("success")]
+                if failed_tools:
+                    names = ", ".join(e["name"] for e in failed_tools)
+                    errors = "; ".join(
+                        f"{e['name']}: {e.get('error', 'unknown')[:150]}"
+                        for e in failed_tools
+                    )
+                    logger.warning("TOOL FAILURES | %d tool(s) failed: %s — retrying", len(failed_tools), names)
+                    last_error = (
+                        f"Code ran but {len(failed_tools)} tool call(s) failed: {errors}. "
+                        f"Fix the parameters or approach and retry."
+                    )
+                    last_tool_results = self._format_tool_results(call_log)
+                    self._metrics.record_retry()
+                    continue
+
                 total_duration = time.monotonic() - run_start
                 logger.info("=" * 60)
                 logger.info(

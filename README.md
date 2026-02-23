@@ -80,13 +80,13 @@ Codemode needs MCP servers running for the tools. Example with npx:
 
 ```bash
 # Google Calendar MCP (port 3001)
-npx -y @anthropic/google-calendar-mcp --port 3001
+npx -y supergateway --stdio "npx google-calendar-mcp" --port 3001 --cors
 
 # Serper search MCP (port 3002)
-SERPER_API_KEY=your-key npx -y @anthropic/serper-mcp --port 3002
+SERPER_API_KEY=your-key npx -y supergateway --stdio "npx -y mcp-server-serper" --port 3002 --cors
 
 # GitHub MCP (port 3003)
-GITHUB_TOKEN=your-token npx -y @anthropic/github-mcp --port 3003
+GITHUB_PERSONAL_ACCESS_TOKEN=your-token npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-github" --port 3003 --cors
 ```
 
 Adjust server commands and ports to match your MCP setup. The examples default to ports 3001/3002/3003.
@@ -411,10 +411,11 @@ Key result (same 3 tasks, 0 distractions):
 
 | | Default (gpt-5) | Codemode (gpt-5.2-codex) |
 |---|---|---|
-| Tokens/task | 498K avg (58K–1.4M) | 16K avg |
-| Cost/task | $0.91 | $0.12 |
-| Time/task | 1,652s | 91s |
-| Quality (Task/Tool/Plan) | 7.8 / 7.9 / 7.3 | 5.3 / 5.9 / 4.6 |
+| Tokens/task | 498K avg (58K–1.4M) | ~18K avg |
+| Cost/task | $0.91 | ~$0.15 |
+| Time/task | 1,652s | ~100s |
+| Quality (Task/Tool/Plan) | 7.8 / 7.9 / 7.3 | 6.9 / 7.8 / 4.6 |
+| Parameter Accuracy | 8.4 | 8.5 |
 
 ## Comparison with Cloudflare's Codemode
 

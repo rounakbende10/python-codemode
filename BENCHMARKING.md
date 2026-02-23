@@ -405,25 +405,35 @@ Apples-to-apples comparison on identical tasks (unit_converter_000, unit_convert
 
 #### Efficiency
 
-| Task | Default Time | Codemode Time | Default Tokens | Codemode Tokens | Default Cost | Codemode Cost |
-|---|---|---|---|---|---|---|
-| unit_converter_000 | 466.8s | 74.7s | 58K | 8K | $0.29 | $0.08 |
-| unit_converter_001 | 203.6s | 101.8s | 30K | 20K | $0.15 | $0.14 |
-| wikipedia_000 | 4,284.7s (71 min) | 97.6s | 1,407K | 19K | $2.30 | $0.13 |
-| **Total (3 tasks)** | **4,955s** | **274s** | **1,495K** | **48K** | **$2.74** | **$0.35** |
+| Task | Default Time | Codemode Time | Default Tokens | Codemode Tokens | Default Tool Calls | Codemode Tool Calls | Default Cost | Codemode Cost |
+|---|---|---|---|---|---|---|---|---|
+| unit_converter_000 | 466.8s | 74.7s | 58K | 8K | 8 | 4 | $0.29 | $0.08 |
+| unit_converter_001 | 203.6s | 101.8s | 30K | 20K | 1 | 23 | $0.15 | $0.14 |
+| wikipedia_000 | 4,284.7s (71 min) | 97.6s | 1,407K | 19K | 157 (72 unique) | 60 | $2.30 | $0.13 |
+| **Total (3 tasks)** | **4,955s** | **274s** | **1,495K** | **48K** | **166** | **87** | **$2.74** | **$0.35** |
 
-Costs based on OpenAI API pricing: gpt-5 at $1.25/1M input + $10/1M output, gpt-5.2-codex at $1.75/1M input + $14/1M output.
+Costs based on [OpenAI API pricing](https://openai.com/api/pricing/): gpt-5 at $1.25/1M input + $10/1M output, gpt-5.2-codex at $1.75/1M input + $14/1M output.
 
 **At 1,000 tasks**: default ~$913, codemode ~$118 (7.8x cheaper).
+
+Notes on tool calls:
+- Default unit_converter_001 used a single `convert_batch` call to convert all values at once — very efficient tool selection by the planner.
+- Default wikipedia_000 made 157 total tool invocations across 20 rounds, but only 72 were unique (cache misses). The rest were the same tools re-requested because prior results were lost in the growing context.
+- Codemode unit_converter_001 made 23 calls (individual conversions instead of batch) because the code generator chose a different strategy. More tool calls but still far fewer tokens.
 
 #### Quality
 
 | Task | Metric | Default (gpt-5) | Codemode (gpt-5.2-codex) |
 |---|---|---|---|
-| unit_converter_000 | Task / Tool / Plan | 8.4 / 8.3 / 8.1 | 5.5 / 3.7 / 4.4 |
-| unit_converter_001 | Task / Tool / Plan | 8.5 / 7.6 / 8.2 | 7.3 / 8.0 / 5.4 |
-| wikipedia_000 | Task / Tool / Plan | 6.4 / 7.8 / 5.5 | 3.2 / 6.1 / 3.9 |
-| **Average** | **Task / Tool / Plan** | **7.8 / 7.9 / 7.3** | **5.3 / 5.9 / 4.6** |
+| unit_converter_000 | Task / Tool / Plan | 8.4 / 8.3 / 8.1 | 8.4 / 8.6 / 5.8 |
+| unit_converter_001 | Task / Tool / Plan | 8.5 / 7.6 / 8.2 | 8.1 / 8.7 / 3.5 |
+| wikipedia_000 | Task / Tool / Plan | 6.4 / 7.8 / 5.5 | 4.1 / 6.0 / 4.4 |
+| **Average** | **Task / Tool / Plan** | **7.8 / 7.9 / 7.3** | **6.9 / 7.8 / 4.6** |
+
+| Metric | Default (gpt-5) | Codemode (gpt-5.2-codex) |
+|---|---|---|
+| Parameter Accuracy | 8.4 | 8.5 |
+| Tool Appropriateness | 7.7 | 8.0 |
 
 #### Context growth (why default is slow)
 
@@ -446,8 +456,8 @@ Codemode — flat, no accumulation:
 
 | | Default Agent | Codemode Agent |
 |---|---|---|
-| **Strengths** | Higher scores (~1.5x); native tool calling; iterative refinement | ~31x fewer tokens; ~7.8x cheaper; ~18x faster; parallel execution |
-| **Weaknesses** | Context growth; slow on complex tasks; ~$0.91/task | Lower scores; relies on retry; code gen can fail |
+| **Strengths** | Higher planning scores; iterative refinement over 20 rounds | ~28x fewer tokens; ~6x cheaper; ~16x faster; matching task completion and tool selection |
+| **Weaknesses** | Context growth; slow on complex tasks; ~$0.91/task | Lower planning scores; relies on retry; code gen can fail |
 | **Best for** | Quality-critical, low-volume | Cost-sensitive, high-throughput |
 
 ## Customization

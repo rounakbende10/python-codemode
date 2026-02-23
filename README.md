@@ -240,17 +240,17 @@ python-codemode/
 
 ## Backends
 
-| Backend | `backend=` | Isolation | Speed | Requirements |
-|---|---|---|---|---|
-| Restricted exec | `"pyodide"` | AST-checked imports + restricted builtins | Fast (sub-ms) | None |
-| Pyodide WASM | `"pyodide-wasm"` | True WASM memory isolation | ~0.7s boot | Node.js + `npm install pyodide` |
+| Backend | `backend=` | Isolation | Requirements |
+|---|---|---|---|
+| Pyodide WASM | `"pyodide-wasm"` (default) | True WASM memory isolation | Node.js + `npm install pyodide` |
+| Restricted exec | `"pyodide"` | AST-checked imports + restricted builtins | None |
 
 ```python
-cm = codemode(tools=tools, backend="pyodide")       # default — fast
-cm = codemode(tools=tools, backend="pyodide-wasm")   # true isolation
+cm = codemode(tools=tools)                           # default — pyodide-wasm
+cm = codemode(tools=tools, backend="pyodide")        # restricted exec fallback
 ```
 
-Falls back to restricted exec if the requested backend isn't available.
+Falls back to restricted exec if the WASM backend isn't available.
 
 ## MCP Tool Loaders
 
@@ -373,9 +373,8 @@ python3 examples/with_pyodide_wasm.py --compare "query"  # compare backends
 ```python
 cm = codemode(
     tools=tools,                    # dict or list of tools
-    backend="pyodide",              # sandbox backend
+    backend="pyodide-wasm",         # sandbox backend (default)
     code_model="gpt-5.2-codex",     # code generation model
-    model="gpt-5-mini",             # orchestrator model
     api_key="sk-...",               # OpenAI API key
     max_retries=3,                  # max code generation retries
     timeout=60,                     # sandbox execution timeout (seconds)

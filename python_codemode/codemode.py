@@ -16,16 +16,14 @@ logger = logging.getLogger("codemode")
 class CodeMode:
     """Main CodeMode class that wraps tools and executes LLM-generated code.
 
-    Uses two models:
-    - code_model: Generates Python code for the sandbox (default: gpt-5.2-codex)
-    - model: Used for orchestration/planning if needed (default: gpt-5-mini)
+    Uses code_model (default: gpt-5.2-codex) to generate Python code
+    that calls tools in a sandboxed environment.
     """
 
     def __init__(
         self,
         tools: dict[str, Callable],
         backend: str = "pyodide-wasm",
-        model: str = "gpt-5-mini",
         code_model: str = "gpt-5.2-codex",
         api_key: str = None,
         max_retries: int = 3,
@@ -33,7 +31,6 @@ class CodeMode:
     ):
         self.tools = tools
         self.backend_name = backend
-        self.model = model
         self.max_retries = max_retries
         self.timeout = timeout
         self._proxy = ToolProxy(tools)
@@ -491,9 +488,8 @@ def codemode(
         tools: Tools for the codemode sandbox. Accepts:
             - ``dict[str, callable]`` — name-to-function mapping
             - ``list`` — list of LangChain @tool functions or plain callables
-        backend: Sandbox backend to use ('pyodide', 'docker', 'nsjail').
+        backend: Sandbox backend to use ('pyodide-wasm', 'pyodide').
         **kwargs: Additional options:
-            model: Orchestrator model (default: gpt-5-mini)
             code_model: Code generation model (default: gpt-5.2-codex)
             api_key: OpenAI API key
             max_retries: Max retry attempts (default: 3)

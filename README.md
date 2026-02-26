@@ -49,18 +49,13 @@ source .venv/bin/activate
 # 3. Install (pick one)
 pip install -e .               # core only (openai, aiohttp, pydantic)
 pip install -e ".[langchain]"  # + LangChain agent support
-pip install -e ".[docker]"     # + Docker backend
 pip install -e ".[all]"        # everything
-pip install -e ".[dev]"        # + pytest for running tests
 
 # 4. Set your OpenAI API key
 echo "OPENAI_API_KEY=sk-your-key-here" > .env
 
 # 5. (Optional) For Pyodide WASM backend
 npm install pyodide
-
-# 6. Verify
-pytest                         # 204 tests
 ```
 
 ### What gets installed
@@ -69,9 +64,7 @@ pytest                         # 204 tests
 |---|---|
 | `pip install -e .` | `openai`, `aiohttp`, `pydantic` |
 | `pip install -e ".[langchain]"` | + `langchain`, `langchain-openai`, `langchain-mcp-adapters` |
-| `pip install -e ".[docker]"` | + `docker` |
 | `pip install -e ".[all]"` | all of the above |
-| `pip install -e ".[dev]"` | + `pytest`, `pytest-asyncio`, `pytest-cov` |
 | `npm install pyodide` | Pyodide WASM runtime (for `pyodide-wasm` backend) |
 
 ### Start MCP servers
@@ -236,35 +229,28 @@ python-codemode/
 │   │   ├── base.py              # SandboxBackend abstract class
 │   │   ├── pyodide_backend.py   # Restricted exec() sandbox (default)
 │   │   ├── pyodide_wasm_backend.py  # Actual Pyodide WASM via Node.js
-│   │   ├── pyodide_runner.js    # Node.js script for WASM execution
-│   │   ├── docker_backend.py    # Docker container sandbox
-│   │   └── nsjail_backend.py    # nsjail/gVisor sandbox (Linux)
+│   │   └── pyodide_runner.js    # Node.js script for WASM execution
 │   └── integrations/
 │       ├── langchain.py         # cm.as_langchain_tool()
 │       ├── openai.py            # cm.as_openai_tool() / cm.as_openai_function()
 │       └── vercel.py            # cm.as_vercel_tool()
 ├── examples/                    # Working examples for every integration
-├── tests/                       # 204 tests
 └── docs/
 ```
 
 ## Backends
 
-| Backend | `backend=` | Isolation | Speed | Requirements |
-|---|---|---|---|---|
-| Restricted exec | `"pyodide"` | AST-checked imports + restricted builtins | Fast (sub-ms) | None |
-| Pyodide WASM | `"pyodide-wasm"` | True WASM memory isolation | ~0.7s boot | Node.js + `npm install pyodide` |
-| Docker | `"docker"` | Container isolation | ~2s boot | Docker running |
-| nsjail | `"nsjail"` | Syscall-level (Google-grade) | Fast | Linux + nsjail binary |
+| Backend | `backend=` | Isolation | Requirements |
+|---|---|---|---|
+| Pyodide WASM | `"pyodide-wasm"` (default) | True WASM memory isolation | Node.js + `npm install pyodide` |
+| Restricted exec | `"pyodide"` | AST-checked imports + restricted builtins | None |
 
 ```python
-cm = codemode(tools=tools, backend="pyodide")       # default — fast
-cm = codemode(tools=tools, backend="pyodide-wasm")   # true isolation
-cm = codemode(tools=tools, backend="docker")          # container
-cm = codemode(tools=tools, backend="nsjail")          # syscall sandbox
+cm = codemode(tools=tools)                           # default — pyodide-wasm
+cm = codemode(tools=tools, backend="pyodide")        # restricted exec fallback
 ```
 
-Falls back to restricted exec if the requested backend isn't available.
+Falls back to restricted exec if the WASM backend isn't available.
 
 ## MCP Tool Loaders
 
@@ -387,9 +373,8 @@ python3 examples/with_pyodide_wasm.py --compare "query"  # compare backends
 ```python
 cm = codemode(
     tools=tools,                    # dict or list of tools
-    backend="pyodide",              # sandbox backend
+    backend="pyodide-wasm",         # sandbox backend (default)
     code_model="gpt-5.2-codex",     # code generation model
-    model="gpt-5-mini",             # orchestrator model
     api_key="sk-...",               # OpenAI API key
     max_retries=3,                  # max code generation retries
     timeout=60,                     # sandbox execution timeout (seconds)
@@ -422,7 +407,7 @@ Key result (same 3 tasks, 0 distractions):
 | | Cloudflare | python-codemode |
 |---|---|---|
 | Language | TypeScript / JavaScript | Python |
-| Sandbox | V8 isolates (WASM) | Restricted exec, Pyodide WASM, Docker, nsjail |
+| Sandbox | V8 isolates (WASM) | Restricted exec, Pyodide WASM |
 | Tool schemas | TypeScript interfaces from `inputSchema` + `outputSchema` | Python type stubs from `inputSchema` |
 | Structured output | `generateObject({ schema })` | `responses.create(text={format: json_schema})` |
 | Parallel calls | `Promise.all()` | `asyncio.gather()` |
